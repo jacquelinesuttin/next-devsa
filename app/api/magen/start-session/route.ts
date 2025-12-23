@@ -2,40 +2,79 @@ import { NextResponse } from 'next/server';
 
 const MAGEN_BASE_URL = 'https://axdupochainmbxtfyflq.supabase.co/functions/v1';
 
+// HARD-CODED FOR TESTING ONLY
+const MAGEN_API_KEY =
+  'magen_9f7c20e98e80bd0d850362ee4b67cb219c8f66c19f8ca580';
+
 export async function POST() {
   try {
-    const apiKey = process.env.MAGEN_API_KEY;
-    
-    // If MAGEN isn't configured, return gracefully
-    if (!apiKey || apiKey.includes('your_')) {
-      console.log('MAGEN: API key not configured');
-      return NextResponse.json({ sessionId: null, configured: false });
-    }
+    const response = await fetch(
+      `${MAGEN_BASE_URL}/magen-verify-start`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Required by updated MAGEN API
+          Authorization: `Bearer ${MAGEN_API_KEY}`,
+        },
+        body: JSON.stringify({
+          action: 'speaker-submission',
+          context: 'call-for-speakers',
+          // userId optional but supported
+          userId: 'devsa-test',
+        }),
+      }
+    );
 
-    const response = await fetch(`${MAGEN_BASE_URL}/magen-verify-start`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        action: 'speaker-submission',
-        context: 'call-for-speakers',
-      }),
-    });
+    const raw = await response.text();
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('MAGEN API error:', response.status, errorText);
-      return NextResponse.json({ sessionId: null, configured: false });
+      console.error('MAGEN API error:', {
+        status: response.status,
+        body: raw,
+      });
+
+      return NextResponse.json(
+        {
+          sessionId: null,
+          configured: true,
+          ok: false,
+          error: raw,
+        },
+        { status: 502 }
+      );
     }
 
-    const result = await response.json();
-    const sessionId = result.data?.sessionId || result.sessionId;
-    
-    return NextResponse.json({ sessionId, configured: true });
-  } catch (error) {
+    let parsed: any = {};
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      parsed = {};
+    }
+
+    const sessionId =
+      parsed?.data?.sessionId ??
+      parsed?.sessionId ??
+      null;
+
+    console.log('MAGEN session started:', sessionId);
+
+    return NextResponse.json({
+      sessionId,
+      configured: true,
+      ok: true,
+    });
+  } catch (error: any) {
     console.error('MAGEN start-session error:', error);
-    return NextResponse.json({ sessionId: null, configured: false });
+
+    return NextResponse.json(
+      {
+        sessionId: null,
+        configured: true,
+        ok: false,
+        reason: error?.message ?? 'unknown_error',
+      },
+      { status: 500 }
+    );
   }
 }
