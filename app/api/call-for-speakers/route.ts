@@ -27,41 +27,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify MAGEN session if provided and API key is configured
-    const MAGEN_API_KEY = process.env.MAGEN_API_KEY;
+    // Verify MAGEN session if provided
     let humanScore: number | undefined;
-    
-    if (magenSessionId && MAGEN_API_KEY && !MAGEN_API_KEY.includes('your_')) {
+    if (magenSessionId) {
       const verification = await checkVerification(magenSessionId);
-
+      
       if (!verification.valid) {
-        console.log('MAGEN verification failed:', verification.error);
         return NextResponse.json(
-          { error: 'Verification failed', reason: verification.error },
+          { error: 'Verification failed. Please complete the verification challenge.' },
           { status: 403 }
         );
       }
 
-      // Check human score threshold
-      if ((verification.humanScore ?? 0) < MAGEN_THRESHOLDS.formSubmission) {
-        console.log('Low human score:', verification.humanScore);
-        return NextResponse.json(
-          { error: 'Verification failed', reason: 'Low confidence score' },
-          { status: 403 }
-        );
+      // Check if humanScore meets threshold
+      if (verification.humanScore !== undefined) {
+        humanScore = verification.humanScore;
+        
+        if (humanScore < MAGEN_THRESHOLDS.formSubmission) {
+          return NextResponse.json(
+            { error: 'Verification score too low. Please try again.' },
+            { status: 403 }
+          );
+        }
       }
-
-      humanScore = verification.humanScore;
-
-      // Log successful verification
-      console.log('MAGEN verification passed:', {
-        humanScore: verification.humanScore,
-        classification: verification.classification,
-        sessionId: verification.sessionId,
-      });
-    } else {
-      // MAGEN not configured - proceeding without verification
-      console.log('MAGEN verification skipped - not configured');
     }
 
     // Submit to Airtable
