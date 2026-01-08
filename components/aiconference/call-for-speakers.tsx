@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "motion/react"
 import { Calendar, MapPin, Send, AlertCircle, Loader2 } from "lucide-react"
@@ -10,6 +10,25 @@ const sessionFormats = [
   { id: "talk", label: "Talk (30-45 min)", description: "Standard presentation with Q&A" },
   { id: "lightning", label: "Lightning Talk (10 min)", description: "Quick, focused presentation" },
 ]
+
+interface EntropyConfig {
+  enabled: boolean
+  intensity?: 'low' | 'medium' | 'high'
+  duration?: number
+  target?: 'mouse' | 'keyboard' | 'touch' | 'all'
+  sessionId?: string
+}
+
+interface MagenEntropy {
+  deploy: (config: EntropyConfig) => void
+  stop?: () => void
+}
+
+declare global {
+  interface Window {
+    MagenEntropy?: MagenEntropy
+  }
+}
 
 export function CallForSpeakers() {
   const router = useRouter()
@@ -24,9 +43,34 @@ export function CallForSpeakers() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [magenSessionId, setMagenSessionId] = useState<string | null>(null)
+  const [entropyDeployed, setEntropyDeployed] = useState(false)
+
+  // Check if MagenEntropy script is loaded
+  const checkMagenEntropy = useCallback((): boolean => {
+    return typeof window !== 'undefined' && typeof window.MagenEntropy !== 'undefined'
+  }, [])
+
+  // Deploy entropy flooding
+  const deployEntropy = useCallback((config: EntropyConfig) => {
+    if (!checkMagenEntropy() || !config.enabled) {
+      return false
+    }
+
+    try {
+      window.MagenEntropy!.deploy(config)
+      setEntropyDeployed(true)
+      return true
+    } catch (error) {
+      console.warn('Failed to deploy entropy flooding:', error)
+      return false
+    }
+  }, [checkMagenEntropy])
 
   // Start MAGEN verification session via our API route
   useEffect(() => {
+    let mounted = true
+    let entropyCheckInterval: NodeJS.Timeout | null = null
+
     const startMagenSession = async () => {
       try {
         const response = await fetch('/api/magen/start-session', {
@@ -35,7 +79,37 @@ export function CallForSpeakers() {
 
         if (response.ok) {
           const data = await response.json()
-          setMagenSessionId(data?.sessionId || null)
+          
+          if (mounted && data?.sessionId) {
+            setMagenSessionId(data.sessionId)
+
+            // Deploy entropy flooding immediately if config is provided
+            if (data.entropyConfig) {
+              // Wait for script to load if needed
+              if (checkMagenEntropy()) {
+                deployEntropy(data.entropyConfig)
+              } else {
+                // Poll for script availability
+                entropyCheckInterval = setInterval(() => {
+                  if (checkMagenEntropy() && mounted) {
+                    deployEntropy(data.entropyConfig)
+                    if (entropyCheckInterval) {
+                      clearInterval(entropyCheckInterval)
+                      entropyCheckInterval = null
+                    }
+                  }
+                }, 100)
+
+                // Stop polling after 5 seconds
+                setTimeout(() => {
+                  if (entropyCheckInterval) {
+                    clearInterval(entropyCheckInterval)
+                    entropyCheckInterval = null
+                  }
+                }, 5000)
+              }
+            }
+          }
         }
       } catch {
         // MAGEN not available - form will still work without verification
@@ -43,7 +117,14 @@ export function CallForSpeakers() {
     }
 
     startMagenSession()
-  }, [])
+
+    return () => {
+      mounted = false
+      if (entropyCheckInterval) {
+        clearInterval(entropyCheckInterval)
+      }
+    }
+  }, [checkMagenEntropy, deployEntropy])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target
@@ -59,7 +140,8 @@ export function CallForSpeakers() {
 
     try {
       // Verify Magen session before proceeding (if available)
-      let verifiedHumanScore: number | undefined;
+      let verifiedHumanScore: number | undefined
+      
       if (magenSessionId) {
         const verifyResponse = await fetch('/api/magen/verify', {
           method: 'POST',
@@ -69,11 +151,33 @@ export function CallForSpeakers() {
         
         if (verifyResponse.ok) {
           const verifyData = await verifyResponse.json()
+          
+          // STEP 3: Deploy entropy flooding if enabled
+          if (
+            typeof window !== 'undefined' &&
+            window.MagenEntropy &&
+            verifyData?.entropyConfig?.enabled
+          ) {
+            window.MagenEntropy.deploy(verifyData.entropyConfig)
+          }
+          
           verifiedHumanScore = verifyData.humanScore
+          
           if (verifyData.humanScore !== undefined && verifyData.humanScore < 0.7) {
             setError("Verification failed. Please try again.")
             setIsSubmitting(false)
             return
+          }
+        } else {
+          // Verification failed but still try to deploy entropy if config provided
+          const errorData = await verifyResponse.json().catch(() => ({}))
+          
+          if (
+            typeof window !== 'undefined' &&
+            window.MagenEntropy &&
+            errorData?.entropyConfig?.enabled
+          ) {
+            window.MagenEntropy.deploy(errorData.entropyConfig)
           }
         }
       }
@@ -320,6 +424,9 @@ export function CallForSpeakers() {
                   MagenMiner
                 </Link>
                 {" "}bot detection
+                {entropyDeployed && (
+                  <span className="ml-2 text-green-500">• Entropy Active</span>
+                )}
               </p>
             </div>
           </form>
