@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Loader2, CheckCircle, Mail } from "lucide-react"
 import Link from "next/link"
 
@@ -9,29 +9,115 @@ interface NewsletterFormProps {
   className?: string
 }
 
+interface EntropyConfig {
+  enabled: boolean
+  intensity?: 'low' | 'medium' | 'high'
+  duration?: number
+  target?: 'mouse' | 'keyboard' | 'touch' | 'all'
+  sessionId?: string
+}
+
+interface MagenEntropy {
+  deploy: (config: EntropyConfig) => void
+  stop?: () => void
+}
+
+declare global {
+  interface Window {
+    MagenEntropy?: MagenEntropy
+  }
+}
+
 export function NewsletterForm({ source = "footer", className = "" }: NewsletterFormProps) {
   const [email, setEmail] = useState("")
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
   const [errorMessage, setErrorMessage] = useState("")
   const [magenSessionId, setMagenSessionId] = useState<string | null>(null)
+  const [entropyDeployed, setEntropyDeployed] = useState(false)
+
+  // Check if MagenEntropy script is loaded
+  const checkMagenEntropy = useCallback((): boolean => {
+    return typeof window !== 'undefined' && typeof window.MagenEntropy !== 'undefined'
+  }, [])
+
+  // Deploy entropy flooding
+  const deployEntropy = useCallback((config: EntropyConfig) => {
+    if (!checkMagenEntropy() || !config.enabled) {
+      return false
+    }
+
+    try {
+      window.MagenEntropy!.deploy(config)
+      setEntropyDeployed(true)
+      return true
+    } catch (error) {
+      console.warn('Failed to deploy entropy flooding:', error)
+      return false
+    }
+  }, [checkMagenEntropy])
 
   // Start Magen session for bot protection
   useEffect(() => {
+    let mounted = true
+    let entropyCheckInterval: NodeJS.Timeout | null = null
+
     const startMagenSession = async () => {
       try {
         const response = await fetch('/api/magen/start-session', {
           method: 'POST',
         })
-        if (response.ok) {
-          const data = await response.json()
-          setMagenSessionId(data?.sessionId || null)
+
+        if (!response.ok) {
+          throw new Error('Failed to start session')
         }
-      } catch {
+
+        const data = await response.json()
+        
+        if (mounted && data?.sessionId) {
+          setMagenSessionId(data.sessionId)
+
+          // Deploy entropy flooding immediately if config is provided
+          if (data.entropyConfig) {
+            // Wait for script to load if needed
+            if (checkMagenEntropy()) {
+              deployEntropy(data.entropyConfig)
+            } else {
+              // Poll for script availability
+              entropyCheckInterval = setInterval(() => {
+                if (checkMagenEntropy() && mounted) {
+                  deployEntropy(data.entropyConfig)
+                  if (entropyCheckInterval) {
+                    clearInterval(entropyCheckInterval)
+                    entropyCheckInterval = null
+                  }
+                }
+              }, 100)
+
+              // Stop polling after 5 seconds
+              setTimeout(() => {
+                if (entropyCheckInterval) {
+                  clearInterval(entropyCheckInterval)
+                  entropyCheckInterval = null
+                }
+              }, 5000)
+            }
+          }
+        }
+      } catch (error) {
         // Magen not available - continue without it
+        console.warn('Magen session start failed:', error)
       }
     }
+
     startMagenSession()
-  }, [])
+
+    return () => {
+      mounted = false
+      if (entropyCheckInterval) {
+        clearInterval(entropyCheckInterval)
+      }
+    }
+  }, [checkMagenEntropy, deployEntropy])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -39,22 +125,39 @@ export function NewsletterForm({ source = "footer", className = "" }: Newsletter
     setErrorMessage("")
 
     try {
-      // Verify Magen session before proceeding (if available)
-      let verifiedHumanScore: number | undefined;
+      let verifiedHumanScore: number | undefined
+      
       if (magenSessionId) {
         const verifyResponse = await fetch('/api/magen/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId: magenSessionId }),
         })
-        
+
         if (verifyResponse.ok) {
           const verifyData = await verifyResponse.json()
+          
+          // Deploy or update entropy flooding if enabled
+          if (verifyData?.entropyConfig?.enabled) {
+            deployEntropy(verifyData.entropyConfig)
+          }
+          
           verifiedHumanScore = verifyData.humanScore
-          if (verifyData.humanScore !== undefined && verifyData.humanScore < 0.7) {
+          
+          // Check human score threshold (0.7)
+          if (verifiedHumanScore !== undefined && verifiedHumanScore < 0.7) {
             setStatus("error")
             setErrorMessage("Verification failed. Please try again.")
             return
+          }
+        } else {
+          // Verification failed but continue with form submission
+          const errorData = await verifyResponse.json().catch(() => ({}))
+          console.warn('Magen verification failed:', errorData)
+          
+          // Still deploy entropy if config provided
+          if (errorData?.entropyConfig?.enabled) {
+            deployEntropy(errorData.entropyConfig)
           }
         }
       }
@@ -71,16 +174,15 @@ export function NewsletterForm({ source = "footer", className = "" }: Newsletter
       })
 
       const data = await response.json()
-
       if (!response.ok) {
         throw new Error(data.error || 'Failed to subscribe')
       }
 
       setStatus("success")
       setEmail("")
-    } catch (err) {
+    } catch (err: any) {
       setStatus("error")
-      setErrorMessage(err instanceof Error ? err.message : "Failed to subscribe")
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to subscribe')
     }
   }
 
@@ -136,6 +238,9 @@ export function NewsletterForm({ source = "footer", className = "" }: Newsletter
         >
           Magen
         </Link>
+        {entropyDeployed && (
+          <span className="ml-2 text-green-400">• Entropy Active</span>
+        )}
       </p>
     </form>
   )
