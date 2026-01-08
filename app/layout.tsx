@@ -1,6 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google"
+import Script from "next/script"
 import "./globals.css"
 import { Navbar } from "@/components/navbar"
 import { Analytics } from "@vercel/analytics/next"
@@ -18,7 +19,7 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
   display: "swap",
-  preload: false, // Only preload if used on initial page load
+  preload: false,
 })
 
 const spaceGrotesk = Space_Grotesk({
@@ -174,6 +175,10 @@ export default function RootLayout({
           <Footer />
           <Analytics />
         </Suspense>
+        <Script
+          src="https://magenminer.io/magen-entropy.js"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   )
